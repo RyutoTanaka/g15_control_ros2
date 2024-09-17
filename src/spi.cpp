@@ -1,4 +1,4 @@
-#include "spi.hpp"
+#include "g15_control/spi.hpp"
 
 extern "C" {
 #include <fcntl.h>
@@ -48,18 +48,15 @@ Spi::~Spi()
   }
 }
 
-std::vector<std::uint8_t> Spi::write(
-  const std::vector<std::uint8_t> & tx_buffer, std::vector<std::uint8_t> && rx_buffer)
+void Spi::write(
+  std::uint8_t* tx_buffer, std::uint8_t* rx_buffer, size_t length)
 {
-  auto length = tx_buffer.size();
-  rx_buffer.resize(length);
-  ioc_transfer_.tx_buf = reinterpret_cast<std::uint64_t>(tx_buffer.data());
-  ioc_transfer_.rx_buf = reinterpret_cast<std::uint64_t>(rx_buffer.data());
+  ioc_transfer_.tx_buf = reinterpret_cast<std::uint64_t>(tx_buffer);
+  ioc_transfer_.rx_buf = reinterpret_cast<std::uint64_t>(rx_buffer);
   ioc_transfer_.len = length;
   if (ioctl(fd_, SPI_IOC_MESSAGE(1), ioc_transfer_) < 0) {
     throw Error(Error::Kind::kWrite, "spi : write");
   }
-  return rx_buffer;
 }
 
 Spi::Error::Error(Kind kind, std::string_view what) noexcept

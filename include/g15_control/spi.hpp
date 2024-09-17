@@ -8,7 +8,7 @@ extern "C" {
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
-#include <vector>
+#include <array>
 
 class Spi
 {
@@ -40,8 +40,7 @@ public:
 
   ~Spi();
 
-  std::vector<std::uint8_t> write(
-    const std::vector<std::uint8_t> & tx_buffer, std::vector<std::uint8_t> && rx_buffer = {});
+  void write(std::uint8_t* tx_buffer,std::uint8_t* rx_buffer,size_t length);
 
 private:
   int fd_;
