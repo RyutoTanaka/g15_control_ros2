@@ -18,7 +18,7 @@ public:
     DifferentialDriveController()
     : Node("Controller"), x_(0.0), y_(0.0), theta_(0.0), 
         spi_("/dev/spidev0.0",
-            1000000,
+            100000,
             [this]() {
                 Spi::Option spi_option = {};
                 spi_option.bits_per_word = this->declare_parameter<int>("spi.bits_per_word", 8);
