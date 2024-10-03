@@ -42,7 +42,7 @@ public:
 
         // 角速度更新タイマー
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(100), std::bind(&DifferentialDriveController::update_odometry, this)
+            std::chrono::milliseconds(20), std::bind(&DifferentialDriveController::update_odometry, this)
         );
 
         // Transform Broadcaster
@@ -62,7 +62,11 @@ private:
         
         command_.power_command.motor_output = true;
         command_.power_command.power_off = false;
-        
+    }
+
+    void update_odometry()
+    {
+        //SPI送受信を行う
         std::array<std::uint8_t,SPI_BUFFER_SIZE> tx_buffer;
         std::array<std::uint8_t,SPI_BUFFER_SIZE> rx_buffer;
         commandSerialize(&command_, tx_buffer.data());
@@ -97,13 +101,11 @@ private:
         result_.cnt_l,result_.cnt_r,
         result_.check_sum
         );
-    }
 
-    void update_odometry()
-    {
+
         // 仮定として、車輪の回転角速度から移動量を計算
-        double delta_left = v_left_ * wheel_radius_;
-        double delta_right = v_right_ * wheel_radius_;
+        double delta_left = result_.vel_l * wheel_radius_;
+        double delta_right = result_.vel_r * wheel_radius_;
 
         // ロボットの進行距離と回転角度を計算
         double delta_s = (delta_left + delta_right) / 2.0;  // 平均移動距離
@@ -166,8 +168,8 @@ private:
     double wheel_radius_;
 
     double x_, y_, theta_;  // ロボットの現在の位置と向き
-    double v_left_, v_right_;  // 左右の車輪の角速度
-
+    float v_left_, v_right_;  // 左右の車輪の角速度
+    
     Command command_;
     Result result_;
     Spi spi_;
