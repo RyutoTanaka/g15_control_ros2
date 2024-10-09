@@ -3,6 +3,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_ros/transform_broadcaster.h"
+#include "std_srvs/srv/set_bool.hpp"
 #include "g15_control/spi.hpp"
 
 extern "C" {
@@ -18,6 +19,8 @@ class DifferentialDriveController : public rclcpp::Node
 public:
     DifferentialDriveController()
     : Node("Controller"), x_(0.0), y_(0.0), theta_(0.0), 
+        emergency_stop_(false),  // 非常停止の初期状態はfalse
+        last_cmd_time_(this->now()),  // 初期化
         spi_("/dev/spidev0.0",
             100000,
             [this]() {
@@ -40,6 +43,12 @@ public:
 
         // Odomメッセージを配信
         odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", rclcpp::SensorDataQoS());
+
+        // 非常停止サービスを提供
+        emergency_stop_service_ = this->create_service<std_srvs::srv::SetBool>(
+            "emergency_stop", 
+            std::bind(&DifferentialDriveController::handle_emergency_stop, this, std::placeholders::_1, std::placeholders::_2)
+        );
 
         // 角速度更新タイマー
         timer_ = this->create_wall_timer(
@@ -74,12 +83,18 @@ private:
         auto current_time = this->now();
         auto time_diff = current_time - last_cmd_time_;
 
-        // cmd_velが1秒以上送られてこなかった場合、SPI送信データを初期化
-        if (time_diff.seconds() > 1.0) {
+        // cmd_velが1秒以上送られてこなかった場合、非常停止がアクティブでない場合はSPI送信データを初期化
+        if (time_diff.seconds() > 1.0 && !emergency_stop_) {
             command_.vel_l = 0.0;
             command_.vel_r = 0.0;
             command_.power_command.motor_output = false;
             command_.power_command.power_off = true;
+        }
+
+        // 非常停止中はSPI通信を一時停止
+        if (emergency_stop_) {
+            RCLCPP_WARN(this->get_logger(), "Emergency stop is active. SPI communication paused.");
+            return;
         }
 
         //SPI送受信を行う
@@ -175,8 +190,23 @@ private:
         //RCLCPP_INFO(this->get_logger(), "Odometry updated: x = %f, y = %f, theta = %f", x_, y_, theta_);
     }
 
+    // 非常停止のハンドラ
+    void handle_emergency_stop(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                               std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+    {
+        emergency_stop_ = request->data;
+        if (emergency_stop_) {
+            RCLCPP_WARN(this->get_logger(), "Emergency stop activated.");
+        } else {
+            RCLCPP_INFO(this->get_logger(), "Emergency stop deactivated.");
+        }
+        response->success = true;
+        response->message = emergency_stop_ ? "Emergency stop is now active." : "Emergency stop is now deactivated.";
+    }
+
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr emergency_stop_service_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
@@ -189,6 +219,7 @@ private:
     Command command_;
     Result result_;
     Spi spi_;
+    bool emergency_stop_;  // 非常停止フラグ
     rclcpp::Time last_cmd_time_;  // cmd_velを受信した最後の時刻
 };
 
