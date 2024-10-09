@@ -11,6 +11,7 @@ extern "C" {
 
 
 #include <array>
+#include <chrono>
 
 class DifferentialDriveController : public rclcpp::Node
 {
@@ -52,6 +53,9 @@ public:
 private:
     void twist_callback(const geometry_msgs::msg::Twist::SharedPtr msg)
     {
+        // Twistメッセージを受信した時刻を更新
+        last_cmd_time_ = this->now();
+
         // Linear and Angular velocities from the Twist message
         double linear_x = msg->linear.x;  // 前進速度 (m/s)
         double angular_z = msg->angular.z;  // 角速度 (rad/s)
@@ -66,6 +70,18 @@ private:
 
     void update_odometry()
     {
+        // 現在の時刻と最後にcmd_velを受信した時刻の差を計算
+        auto current_time = this->now();
+        auto time_diff = current_time - last_cmd_time_;
+
+        // cmd_velが1秒以上送られてこなかった場合、SPI送信データを初期化
+        if (time_diff.seconds() > 1.0) {
+            command_.vel_l = 0.0;
+            command_.vel_r = 0.0;
+            command_.power_command.motor_output = false;
+            command_.power_command.power_off = true;
+        }
+
         //SPI送受信を行う
         std::array<std::uint8_t,SPI_BUFFER_SIZE> tx_buffer;
         std::array<std::uint8_t,SPI_BUFFER_SIZE> rx_buffer;
@@ -173,6 +189,7 @@ private:
     Command command_;
     Result result_;
     Spi spi_;
+    rclcpp::Time last_cmd_time_;  // cmd_velを受信した最後の時刻
 };
 
 int main(int argc, char * argv[])
