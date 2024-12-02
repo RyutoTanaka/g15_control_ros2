@@ -5,6 +5,7 @@
 #include "tf2_ros/transform_broadcaster.h"
 #include "std_srvs/srv/set_bool.hpp"
 #include "g15_control/spi.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
 
 extern "C" {
 #include "spi_data.h"
@@ -49,6 +50,8 @@ public:
             "emergency_stop", 
             std::bind(&DifferentialDriveController::handle_emergency_stop, this, std::placeholders::_1, std::placeholders::_2)
         );
+
+        battery_state_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("battery_state", rclcpp::SensorDataQoS());
 
         // 角速度更新タイマー
         timer_ = this->create_wall_timer(
@@ -187,6 +190,14 @@ private:
 
         tf_broadcaster_->sendTransform(odom_tf);
 
+        auto battery_msg = sensor_msgs::msg::BatteryState();
+        battery_msg.voltage = result_.power_result.v_bat;  // バッテリー電圧 (V)
+        battery_msg.current = result_.power_result.i_bat;  // 放電電流 (A)、負の場合は放電中
+        battery_msg.power_supply_health = sensor_msgs::msg::BatteryState::POWER_SUPPLY_HEALTH_GOOD;  // 健康状態
+        battery_msg.power_supply_technology = sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;  // リチウムイオン
+        battery_msg.present = true;  // バッテリーが接続されているかどうか
+        battery_state_publisher_->publish(battery_msg);
+
         //RCLCPP_INFO(this->get_logger(), "Odometry updated: x = %f, y = %f, theta = %f", x_, y_, theta_);
     }
 
@@ -207,6 +218,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr emergency_stop_service_;
+    rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_state_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 

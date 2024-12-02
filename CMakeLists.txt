@@ -40,6 +40,7 @@ add_executable( controller
 ament_target_dependencies(controller
   rclcpp
   geometry_msgs
+  sensor_msgs
   nav_msgs
   std_srvs
   tf2_ros
