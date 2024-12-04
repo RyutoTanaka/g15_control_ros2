@@ -1,5 +1,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/vector3.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_ros/transform_broadcaster.h"
@@ -22,6 +23,7 @@ public:
     : Node("Controller"), x_(0.0), y_(0.0), theta_(0.0), 
         emergency_stop_(false),  // 非常停止の初期状態はfalse
         last_cmd_time_(this->now()),  // 初期化
+        last_pull_time_(this->now()),
         spi_("/dev/spidev0.0",
             100000,
             [this]() {
@@ -42,6 +44,13 @@ public:
             "cmd_vel", rclcpp::SensorDataQoS(), std::bind(&DifferentialDriveController::twist_callback, this, std::placeholders::_1)
         );
 
+        chair_subscription_ = this->create_subscription<geometry_msgs::msg::Vector3>(
+            "line_kick", rclcpp::SensorDataQoS(), std::bind(&DifferentialDriveController::chair_callback, this, std::placeholders::_1)
+        );
+
+        desk_subscription_ = this->create_subscription<geometry_msgs::msg::Vector3>(
+            "chip_kick", rclcpp::SensorDataQoS(), std::bind(&DifferentialDriveController::desk_callback, this, std::placeholders::_1)
+        );
         // Odomメッセージを配信
         odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", rclcpp::SensorDataQoS());
 
@@ -76,8 +85,28 @@ private:
         command_.vel_l = (linear_x - (wheel_base_ / 2.0) * angular_z) / wheel_radius_;
         command_.vel_r = (linear_x + (wheel_base_ / 2.0) * angular_z) / wheel_radius_;
         
-        command_.power_command.motor_output = true;
-        command_.power_command.power_off = false;
+        command_.can_command.motor_output = true;
+        command_.can_command.power_off = false;
+    }
+    
+    void chair_callback(const geometry_msgs::msg::Vector3::SharedPtr msg)
+    {
+        // chair pullメッセージを受信した時刻を更新
+        last_pull_time_ = this->now();
+        RCLCPP_INFO(this->get_logger(), "chair : %f,%f,%f",msg->x,msg->y,msg->z);
+        command_.can_command.mode = false;
+        command_.can_command.pull = true;
+        command_.can_command.release = false;
+    }
+
+    void desk_callback(const geometry_msgs::msg::Vector3::SharedPtr msg)
+    {
+        // desk pullメッセージを受信した時刻を更新
+        last_pull_time_ = this->now();
+        RCLCPP_INFO(this->get_logger(), "desk : %f,%f,%f",msg->x,msg->y,msg->z);
+        command_.can_command.mode = true;
+        command_.can_command.pull = true;
+        command_.can_command.release = false;
     }
 
     void update_odometry()
@@ -90,8 +119,19 @@ private:
         if (time_diff.seconds() > 1.0 && !emergency_stop_) {
             command_.vel_l = 0.0;
             command_.vel_r = 0.0;
-            command_.power_command.motor_output = false;
-            command_.power_command.power_off = true;
+            command_.can_command.motor_output = false;
+            command_.can_command.power_off = false;
+            command_.can_command.mode = false;
+            command_.can_command.pull = false;
+            command_.can_command.release = false;
+        }
+
+        rclcpp::Duration pull_time_diff = current_time - last_pull_time_;
+        // pullコマンドが0.5秒以上送られてこなかった場合、release指令を発行
+        if (pull_time_diff.seconds() > 2.0) {
+            command_.can_command.mode = false;
+            command_.can_command.pull = false;
+            command_.can_command.release = true;
         }
 
         // 非常停止中はSPI通信を一時停止
@@ -100,6 +140,11 @@ private:
             return;
         }
 
+        RCLCPP_INFO(this->get_logger(),"%d%d%d%d%d",command_.can_command.motor_output,
+                                                    command_.can_command.power_off,
+                                                    command_.can_command.mode,
+                                                    command_.can_command.pull,
+                                                    command_.can_command.release);
         //SPI送受信を行う
         std::array<std::uint8_t,SPI_BUFFER_SIZE> tx_buffer;
         std::array<std::uint8_t,SPI_BUFFER_SIZE> rx_buffer;
@@ -216,6 +261,9 @@ private:
     }
 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr chair_subscription_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr desk_subscription_;
+
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr emergency_stop_service_;
     rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_state_publisher_;
@@ -233,6 +281,7 @@ private:
     Spi spi_;
     bool emergency_stop_;  // 非常停止フラグ
     rclcpp::Time last_cmd_time_;  // cmd_velを受信した最後の時刻
+    rclcpp::Time last_pull_time_;  // 保持指令を受信した最後の時刻
 };
 
 int main(int argc, char * argv[])
